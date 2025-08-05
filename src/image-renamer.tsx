@@ -60,7 +60,7 @@ const ImageRenamer = () => {
           "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY
         },
         body: JSON.stringify({
-          model: "claude-3-haiku-20240307", // Using a faster model for filenames
+          model: "claude-4-opus-20250514",
           max_tokens: 50,
           messages: [
             {
