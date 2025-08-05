@@ -56,7 +56,7 @@ const ImageRenamer = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Remember to add your API key in Vercel's Environment Variables
+          "anthropic-version": "2023-06-01",
           "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY
         },
         body: JSON.stringify({
