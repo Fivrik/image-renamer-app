@@ -1,20 +1,38 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Upload, Camera, Download, Loader, Edit3, Check, X } from 'lucide-react';
 
+// Define a clear "shape" for our image object for TypeScript
+interface ImageState {
+  id: number;
+  originalFile: File;
+  originalName: string;
+  base64: string;
+  suggestedName: string;
+  processing: boolean;
+  processed: boolean;
+}
+
 const ImageRenamer = () => {
-  const [images, setImages] = useState([]);
+  // Use our new interface to tell TypeScript what's allowed in this array
+  const [images, setImages] = useState<ImageState[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [editingIndex, setEditingIndex] = useState(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
 
-  const handleFileUpload = useCallback((event) => {
+  const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    // Ensure files exist before processing
+    if (!event.target.files) return;
+
     const files = Array.from(event.target.files);
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
     
-    imageFiles.forEach((file) => {
+    imageFiles.forEach((file: File) => {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const newImage = {
+        // Ensure the result exists and is a string
+        if (!e.target || typeof e.target.result !== 'string') return;
+
+        const newImage: ImageState = {
           id: Date.now() + Math.random(),
           originalFile: file,
           originalName: file.name,
@@ -29,19 +47,21 @@ const ImageRenamer = () => {
     });
   }, []);
 
-  const generateDescriptiveName = async (imageData, originalName) => {
+  const generateDescriptiveName = async (imageData: string, originalName: string) => {
     try {
       const base64Data = imageData.split(',')[1];
-      const fileExtension = originalName.split('.').pop().toLowerCase();
+      const fileExtension = originalName.split('.').pop()?.toLowerCase() || 'jpeg';
       
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // Remember to add your API key in Vercel's Environment Variables
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY
         },
         body: JSON.stringify({
-          model: "claude-opus-4-20241218",
-          max_tokens: 200,
+          model: "claude-3-haiku-20240307", // Using a faster model for filenames
+          max_tokens: 50,
           messages: [
             {
               role: "user",
@@ -56,7 +76,7 @@ const ImageRenamer = () => {
                 },
                 {
                   type: "text",
-                  text: "Generate a descriptive filename for this image that would make it easy to find in an archive. Focus on accurately identifying the setting/location (restaurant, home, office, etc.) and the main subject matter. Look carefully at contextual clues like furniture, fixtures, and surrounding objects to determine the correct environment. The filename should be concise but descriptive, using underscores instead of spaces, and should capture the main subject, setting, and key elements. Respond with only the filename without the file extension."
+                  text: "Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension."
                 }
               ]
             }
@@ -71,26 +91,28 @@ const ImageRenamer = () => {
       const data = await response.json();
       let suggestedName = data.content[0].text.trim();
       
-      // Clean up the suggested name
       suggestedName = suggestedName
-        .replace(/[^a-zA-Z0-9_\-\s]/g, '') // Remove special characters except underscores, hyphens, and spaces
-        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+        .replace(/\s+/g, '_')
         .toLowerCase()
-        .substring(0, 50); // Limit length
+        .substring(0, 50);
       
       return `${suggestedName}.${fileExtension}`;
     } catch (error) {
       console.error('Error generating descriptive name:', error);
-      return `processed_${Date.now()}.${originalName.split('.').pop()}`;
+      const fallbackExtension = originalName.split('.').pop() || 'jpeg';
+      return `processed_${Date.now()}.${fallbackExtension}`;
     }
   };
 
-  const processImage = async (imageId) => {
+  const processImage = async (imageId: number) => {
     setImages(prev => prev.map(img => 
       img.id === imageId ? { ...img, processing: true } : img
     ));
 
     const image = images.find(img => img.id === imageId);
+    if (!image) return;
+
     const suggestedName = await generateDescriptiveName(image.base64, image.originalName);
 
     setImages(prev => prev.map(img => 
@@ -111,7 +133,7 @@ const ImageRenamer = () => {
     setProcessing(false);
   };
 
-  const downloadImage = (image) => {
+  const downloadImage = (image: ImageState) => {
     const link = document.createElement('a');
     link.href = image.base64;
     link.download = image.suggestedName || image.originalName;
@@ -121,14 +143,13 @@ const ImageRenamer = () => {
   };
 
   const downloadAllImages = () => {
-    images.forEach(image => {
-      if (image.processed) {
-        setTimeout(() => downloadImage(image), 100);
-      }
+    const processedImages = images.filter(img => img.processed);
+    processedImages.forEach((image, index) => {
+      setTimeout(() => downloadImage(image), index * 100);
     });
   };
 
-  const startEditing = (index, currentName) => {
+  const startEditing = (index: number, currentName: string) => {
     setEditingIndex(index);
     setEditingName(currentName);
   };
@@ -148,26 +169,25 @@ const ImageRenamer = () => {
     setEditingName('');
   };
 
-  const removeImage = (imageId) => {
+  const removeImage = (imageId: number) => {
     setImages(prev => prev.filter(img => img.id !== imageId));
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6 bg-white">
+    <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen font-sans">
       <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">AI Image Renamer</h1>
-        <p className="text-gray-600">Upload images and get descriptive filenames for better organization</p>
+        <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Image Renamer</h1>
+        <p className="text-gray-600 text-lg">Upload images and get descriptive filenames powered by AI.</p>
       </div>
 
-      {/* Upload Area */}
       <div className="mb-6">
-        <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+        <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-white hover:bg-gray-100 transition-colors">
           <div className="flex flex-col items-center justify-center pt-5 pb-6">
-            <Upload className="w-8 h-8 mb-4 text-gray-500" />
-            <p className="mb-2 text-sm text-gray-500">
+            <Upload className="w-10 h-10 mb-4 text-gray-500" />
+            <p className="mb-2 text-md text-gray-500">
               <span className="font-semibold">Click to upload</span> or drag and drop
             </p>
-            <p className="text-xs text-gray-500">PNG, JPG, GIF, WebP (MAX. 10MB each)</p>
+            <p className="text-xs text-gray-500">PNG, JPG, GIF, WebP</p>
           </div>
           <input
             type="file"
@@ -179,34 +199,32 @@ const ImageRenamer = () => {
         </label>
       </div>
 
-      {/* Control Buttons */}
       {images.length > 0 && (
-        <div className="flex gap-4 mb-6">
+        <div className="flex flex-wrap gap-4 mb-6">
           <button
             onClick={processAllImages}
             disabled={processing || images.every(img => img.processed)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-4 py-2 font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
-            {processing ? <Loader className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-            {processing ? 'Processing...' : 'Process All Images'}
+            {processing ? <Loader className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
+            {processing ? 'Processing...' : `Process All (${images.filter(i => !i.processed).length})`}
           </button>
           
           <button
             onClick={downloadAllImages}
             disabled={!images.some(img => img.processed)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-4 py-2 font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-5 h-5" />
             Download All Renamed
           </button>
         </div>
       )}
 
-      {/* Images Grid */}
       {images.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {images.map((image, index) => (
-            <div key={image.id} className="bg-white border rounded-lg shadow-sm overflow-hidden">
+            <div key={image.id} className="bg-white border rounded-lg shadow-md overflow-hidden flex flex-col">
               <div className="relative">
                 <img
                   src={image.base64}
@@ -215,86 +233,58 @@ const ImageRenamer = () => {
                 />
                 <button
                   onClick={() => removeImage(image.id)}
-                  className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                  aria-label="Remove image"
+                  className="absolute top-2 right-2 p-1.5 bg-black bg-opacity-50 text-white rounded-full hover:bg-red-600 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
               
-              <div className="p-4">
-                <div className="mb-2">
-                  <p className="text-sm text-gray-500 mb-1">Original:</p>
-                  <p className="text-sm font-medium truncate">{image.originalName}</p>
+              <div className="p-4 flex flex-col flex-grow">
+                <div className="mb-2 flex-grow">
+                  <p className="text-xs text-gray-500 mb-1">Original:</p>
+                  <p className="text-sm font-medium text-gray-700 truncate" title={image.originalName}>{image.originalName}</p>
                 </div>
                 
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 mb-1">New name:</p>
+                  <p className="text-xs text-gray-500 mb-1">New name:</p>
                   {editingIndex === index ? (
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 items-center">
                       <input
                         type="text"
                         value={editingName}
                         onChange={(e) => setEditingName(e.target.value)}
-                        className="flex-1 text-sm px-2 py-1 border rounded"
+                        className="flex-1 text-sm px-2 py-1 border border-blue-500 rounded ring-2 ring-blue-200"
                         onKeyPress={(e) => e.key === 'Enter' && saveEdit()}
+                        autoFocus
                       />
-                      <button
-                        onClick={saveEdit}
-                        className="p-1 text-green-600 hover:bg-green-100 rounded"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={cancelEdit}
-                        className="p-1 text-red-600 hover:bg-red-100 rounded"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                      <button onClick={saveEdit} aria-label="Save name" className="p-1.5 text-green-600 hover:bg-green-100 rounded"><Check className="w-5 h-5" /></button>
+                      <button onClick={cancelEdit} aria-label="Cancel edit" className="p-1.5 text-red-600 hover:bg-red-100 rounded"><X className="w-5 h-5" /></button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-blue-600 flex-1 truncate">
+                    <div className="flex items-center gap-2 group">
+                      <p className="text-sm font-semibold text-blue-700 flex-1 truncate" title={image.suggestedName}>
                         {image.processing ? (
-                          <span className="flex items-center gap-2">
-                            <Loader className="w-4 h-4 animate-spin" />
-                            Analyzing...
-                          </span>
+                          <span className="flex items-center gap-2 text-gray-500"><Loader className="w-4 h-4 animate-spin" />Analyzing...</span>
                         ) : image.processed ? (
                           image.suggestedName
                         ) : (
-                          <span className="text-gray-400">Click "Process" to generate</span>
+                          <span className="text-gray-400 font-normal">Ready to process</span>
                         )}
                       </p>
                       {image.processed && (
-                        <button
-                          onClick={() => startEditing(index, image.suggestedName)}
-                          className="p-1 text-gray-500 hover:bg-gray-100 rounded"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+                        <button onClick={() => startEditing(index, image.suggestedName)} aria-label="Edit name" className="p-1.5 text-gray-500 hover:bg-gray-200 rounded opacity-0 group-hover:opacity-100 transition-opacity"><Edit3 className="w-4 h-4" /></button>
                       )}
                     </div>
                   )}
                 </div>
                 
-                <div className="flex gap-2">
+                <div className="flex gap-2 mt-auto">
                   {!image.processed && !image.processing && (
-                    <button
-                      onClick={() => processImage(image.id)}
-                      className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                    >
-                      Process
-                    </button>
+                    <button onClick={() => processImage(image.id)} className="w-full px-3 py-2 text-sm font-bold bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">Process</button>
                   )}
-                  
                   {image.processed && (
-                    <button
-                      onClick={() => downloadImage(image)}
-                      className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors flex items-center justify-center gap-1"
-                    >
-                      <Download className="w-4 h-4" />
-                      Download
-                    </button>
+                    <button onClick={() => downloadImage(image)} className="w-full px-3 py-2 text-sm font-bold bg-green-600 text-white rounded hover:bg-green-700 transition-colors flex items-center justify-center gap-2"><Download className="w-4 h-4" />Download</button>
                   )}
                 </div>
               </div>
@@ -304,9 +294,10 @@ const ImageRenamer = () => {
       )}
 
       {images.length === 0 && (
-        <div className="text-center py-12">
+        <div className="text-center py-20">
           <Camera className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500">Upload images to get started</p>
+          <h3 className="text-xl font-semibold text-gray-600">Upload Your Images</h3>
+          <p className="text-gray-500">Drag and drop or click above to begin.</p>
         </div>
       )}
     </div>
