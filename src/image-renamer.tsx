@@ -49,59 +49,100 @@ const ImageRenamer = () => {
 
   const generateDescriptiveName = async (imageData: string, originalName: string) => {
     try {
+      console.log('🔍 Starting image analysis for:', originalName);
+      
+      // Check if API key is available
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      console.log('🔑 API Key available:', !!apiKey);
+      console.log('🔑 API Key starts with:', apiKey?.substring(0, 10) + '...');
+      
+      if (!apiKey) {
+        throw new Error('VITE_ANTHROPIC_API_KEY environment variable is not set');
+      }
+      
       const base64Data = imageData.split(',')[1];
       const fileExtension = originalName.split('.').pop()?.toLowerCase() || 'jpeg';
+      console.log('📁 File extension:', fileExtension);
+      console.log('🖼️ Base64 data length:', base64Data.length);
       
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const requestBody = {
+        model: "claude-4-opus-20250514",
+        max_tokens: 50,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
+                  data: base64Data
+                }
+              },
+              {
+                type: "text",
+                text: "Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension."
+              }
+            ]
+          }
+        ]
+      };
+      
+      console.log('📤 Making API request to Anthropic...');
+      console.log('📋 Request model:', requestBody.model);
+      
+      const response = await fetch("/api/anthropic/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01",
-          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY
+          "x-api-key": apiKey
         },
-        body: JSON.stringify({
-          model: "claude-4-opus-20250514",
-          max_tokens: 50,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
-                    data: base64Data
-                  }
-                },
-                {
-                  type: "text",
-                  text: "Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension."
-                }
-              ]
-            }
-          ]
-        })
+        body: JSON.stringify(requestBody)
       });
 
+      console.log('📨 API response status:', response.status);
+      console.log('📨 API response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ API error response:', errorText);
+        throw new Error(`API request failed: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
-      let suggestedName = data.content[0].text.trim();
+      console.log('✅ API response data:', data);
       
+      if (!data.content || !data.content[0] || !data.content[0].text) {
+        throw new Error('Invalid API response structure');
+      }
+      
+      let suggestedName = data.content[0].text.trim();
+      console.log('🏷️ Raw suggested name:', suggestedName);
+      
+      // Clean the suggested name
       suggestedName = suggestedName
         .replace(/[^a-zA-Z0-9_\-\s]/g, '')
         .replace(/\s+/g, '_')
         .toLowerCase()
         .substring(0, 50);
       
-      return `${suggestedName}.${fileExtension}`;
+      const finalName = `${suggestedName}.${fileExtension}`;
+      console.log('🎯 Final generated filename:', finalName);
+      
+      return finalName;
     } catch (error) {
-      console.error('Error generating descriptive name:', error);
+      console.error('💥 Error generating descriptive name:', error);
+      console.error('🔍 Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
       const fallbackExtension = originalName.split('.').pop() || 'jpeg';
-      return `processed_${Date.now()}.${fallbackExtension}`;
+      const fallbackName = `processed_${Date.now()}.${fallbackExtension}`;
+      console.log('🔄 Using fallback name:', fallbackName);
+      return fallbackName;
     }
   };
 
