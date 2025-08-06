@@ -16,6 +16,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
+    console.log('Debug - Available env vars:', Object.keys(process.env));
+    console.log('Debug - ANTHROPIC env vars:', Object.keys(process.env).filter(k => k.includes('ANTHROPIC')));
+    console.log('Debug - API Key Length:', apiKey ? apiKey.length : 0);
+    
     if (!apiKey) {
       console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('ANTHROPIC')));
       return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
