@@ -68,15 +68,23 @@ const ImageRenamer = () => {
 
       if (!response.ok) {
         let errorMessage = `API request failed: ${response.status}`;
+        // Clone the response so we can read it multiple times if needed
+        const responseClone = response.clone();
+        
         try {
-          const errorData = await response.json();
+          const errorData = await responseClone.json();
           console.error('❌ API error response:', errorData);
           errorMessage += ` - ${errorData.error}`;
-        } catch {
-          // If JSON parsing fails, try to get text
-          const errorText = await response.text();
-          console.error('❌ API error response (raw):', errorText);
-          errorMessage += ` - ${errorText.substring(0, 200)}`;
+        } catch (jsonError) {
+          // If JSON parsing fails, try to get text from the original response
+          try {
+            const errorText = await response.text();
+            console.error('❌ API error response (raw):', errorText);
+            errorMessage += ` - ${errorText.substring(0, 200)}`;
+          } catch (textError) {
+            console.error('❌ Failed to read error response:', textError);
+            // Don't modify the error message if we can't read the response
+          }
         }
         throw new Error(errorMessage);
       }
