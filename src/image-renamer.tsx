@@ -51,92 +51,43 @@ const ImageRenamer = () => {
     try {
       console.log('🔍 Starting image analysis for:', originalName);
       
-      // Check if API key is available
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      console.log('🔑 API Key available:', !!apiKey);
-      console.log('🔑 API Key starts with:', apiKey?.substring(0, 10) + '...');
+      console.log('📤 Making API request to backend...');
       
-      if (!apiKey) {
-        throw new Error('VITE_ANTHROPIC_API_KEY environment variable is not set');
-      }
-      
-      const base64Data = imageData.split(',')[1];
-      const fileExtension = originalName.split('.').pop()?.toLowerCase() || 'jpeg';
-      console.log('📁 File extension:', fileExtension);
-      console.log('🖼️ Base64 data length:', base64Data.length);
-      
-      const requestBody = {
-        model: "claude-4-opus-20250514",
-        max_tokens: 50,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
-                  data: base64Data
-                }
-              },
-              {
-                type: "text",
-                text: "Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension."
-              }
-            ]
-          }
-        ]
-      };
-      
-      console.log('📤 Making API request to Anthropic...');
-      console.log('📋 Request model:', requestBody.model);
-      
-      const response = await fetch("/api/anthropic/v1/messages", {
+      const response = await fetch("/api/analyze-image", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          imageData,
+          originalName
+        })
       });
 
       console.log('📨 API response status:', response.status);
-      console.log('📨 API response headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ API error response:', errorText);
-        throw new Error(`API request failed: ${response.status} - ${errorText}`);
+        const errorData = await response.json();
+        console.error('❌ API error response:', errorData);
+        throw new Error(`API request failed: ${response.status} - ${errorData.error}`);
       }
 
       const data = await response.json();
       console.log('✅ API response data:', data);
       
-      if (!data.content || !data.content[0] || !data.content[0].text) {
-        throw new Error('Invalid API response structure');
+      if (!data.suggestedName) {
+        throw new Error('Invalid API response: missing suggestedName');
       }
       
-      let suggestedName = data.content[0].text.trim();
-      console.log('🏷️ Raw suggested name:', suggestedName);
+      console.log('🎯 Final generated filename:', data.suggestedName);
       
-      // Clean the suggested name
-      suggestedName = suggestedName
-        .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-        .replace(/\s+/g, '_')
-        .toLowerCase()
-        .substring(0, 50);
-      
-      const finalName = `${suggestedName}.${fileExtension}`;
-      console.log('🎯 Final generated filename:', finalName);
-      
-      return finalName;
+      return data.suggestedName;
     } catch (error) {
       console.error('💥 Error generating descriptive name:', error);
       console.error('🔍 Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        name: error instanceof Error ? error.name : 'Unknown'
       });
       
       const fallbackExtension = originalName.split('.').pop() || 'jpeg';
