@@ -67,9 +67,18 @@ const ImageRenamer = () => {
       console.log('📨 API response status:', response.status);
 
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ API error response:', errorData);
-        throw new Error(`API request failed: ${response.status} - ${errorData.error}`);
+        let errorMessage = `API request failed: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          console.error('❌ API error response:', errorData);
+          errorMessage += ` - ${errorData.error}`;
+        } catch {
+          // If JSON parsing fails, try to get text
+          const errorText = await response.text();
+          console.error('❌ API error response (raw):', errorText);
+          errorMessage += ` - ${errorText.substring(0, 200)}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
