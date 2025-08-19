@@ -1,6 +1,28 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Using ES module export syntax for Vercel Edge Function
+interface RequestBody {
+  imageData: string;
+  originalName: string;
+}
+
+interface AnthropicRequestBody {
+  model: string;
+  max_tokens: number;
+  messages: Array<{
+    role: string;
+    content: Array<{
+      type: string;
+      text?: string;
+      source?: {
+        type: string;
+        media_type: string;
+        data: string;
+      };
+    }>;
+  }>;
+}
+
+// API route handler
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   console.log('🚀 API handler called:', req.method);
   
