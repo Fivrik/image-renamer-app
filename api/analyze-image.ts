@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+// Using ES module export syntax for Vercel Edge Function
+const handler = async (req: VercelRequest, res: VercelResponse) => {
   console.log('🚀 API handler called:', req.method);
   
   if (req.method !== 'POST') {
@@ -175,3 +176,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 }
+
+export { handler as default };
