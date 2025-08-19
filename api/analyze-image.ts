@@ -35,22 +35,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('📤 Making request to Anthropic API...', {
       model: 'claude-4-opus-20250514',
       apiKeyPresent: !!apiKey,
-      imageSize: base64Data.length
+      imageSize: base64Data.length,
+      endpoint: 'https://api.anthropic.com/v1/messages'
     });
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
+
+    let response;
+    let errorText;
+    try {
+      const requestBody = {
         model: 'claude-4-opus-20250514',
         max_tokens: 50,
-        messages: [
-          {
-            role: 'user',
-            content: [
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
+                data: base64Data
+              }
+            },
+            {
+              type: 'text',
+              text: 'Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension.'
+            }
+          ]
+        }]
+      };
+
+      console.log('📤 Request structure:', {
+        ...requestBody,
+        messages: [{
+          ...requestBody.messages[0],
+          content: requestBody.messages[0].content.map(c => 
+            c.type === 'image' ? { ...c, source: { ...c.source, data: '[BASE64_DATA]' }} : c
+          )
+        }]
+      });
+
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify(requestBody)
+      });
+    } catch (fetchError) {
+      console.error('💥 Network error:', {
+        name: fetchError?.constructor?.name,
+        message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
+        stack: fetchError instanceof Error ? fetchError.stack : undefined
+      });
+      throw fetchError;
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(e => 'Failed to read error response');
+      console.error('❌ Anthropic API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries([...response.headers.entries()]),
+        error: errorText
+      });
+      throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
+    }
               {
                 type: 'image',
                 source: {
@@ -69,27 +120,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     });
 
-    console.log('📨 Anthropic API response:', {
+    console.log('📨 Response details:', {
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries([...response.headers.entries()])
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Anthropic API error:', {
+      const errorText = await response.text().catch(e => 'Failed to read error response');
+      console.error('❌ API error:', {
         status: response.status,
         statusText: response.statusText,
         headers: Object.fromEntries([...response.headers.entries()]),
-        error: errorText
+        error: errorText,
+        key: apiKey ? 'Present (length: ' + apiKey.length + ')' : 'Missing'
       });
-      return res.status(response.status).json({ 
-        error: `Anthropic API error: ${response.status} - ${errorText}` 
-      });
+      throw new Error(`API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('✅ Anthropic API response:', {
+    console.log('✅ API response:', {
       status: response.status,
       headers: Object.fromEntries([...response.headers.entries()]),
       data: JSON.stringify(data, null, 2)
@@ -113,9 +163,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ suggestedName: finalName });
 
   } catch (error) {
-    console.error('Server error:', error);
+    console.error('💥 Server error:', {
+      type: error?.constructor?.name,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    
     return res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Unknown server error' 
+      error: error instanceof Error ? error.message : 'Unknown server error',
+      type: error?.constructor?.name
     });
   }
 }
