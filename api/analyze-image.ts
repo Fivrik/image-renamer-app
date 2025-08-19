@@ -32,7 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('📁 File extension:', fileExtension);
     console.log('🖼️ Base64 data length:', base64Data.length);
 
-    console.log('📤 Making request to Anthropic API...');
+    console.log('📤 Making request to Anthropic API...', {
+      model: 'claude-4-opus-20250514',
+      apiKeyPresent: !!apiKey,
+      imageSize: base64Data.length
+    });
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -65,18 +69,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     });
 
-    console.log('📨 Anthropic API response status:', response.status);
+    console.log('📨 Anthropic API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries([...response.headers.entries()])
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Anthropic API error:', errorText);
+      console.error('❌ Anthropic API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries([...response.headers.entries()]),
+        error: errorText
+      });
       return res.status(response.status).json({ 
         error: `Anthropic API error: ${response.status} - ${errorText}` 
       });
     }
 
     const data = await response.json();
-    console.log('✅ Anthropic API response:', JSON.stringify(data, null, 2));
+    console.log('✅ Anthropic API response:', {
+      status: response.status,
+      headers: Object.fromEntries([...response.headers.entries()]),
+      data: JSON.stringify(data, null, 2)
+    });
     
     if (!data.content || !data.content[0] || !data.content[0].text) {
       return res.status(500).json({ error: 'Invalid API response structure' });
