@@ -18,6 +18,19 @@ const ImageRenamer = () => {
   const [processing, setProcessing] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'error' | 'success' }>>([]);
+
+  const showToast = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     // Ensure files exist before processing
@@ -106,6 +119,8 @@ const ImageRenamer = () => {
         stack: error instanceof Error ? error.stack : undefined,
         name: error instanceof Error ? error.name : 'Unknown'
       });
+      // Notify user on failure
+      showToast('Failed to generate AI name. Using fallback.', 'error');
       
       const fallbackExtension = originalName.split('.').pop() || 'jpeg';
       const fallbackName = `processed_${Date.now()}.${fallbackExtension}`;
@@ -133,12 +148,19 @@ const ImageRenamer = () => {
 
   const processAllImages = async () => {
     setProcessing(true);
-    const unprocessedImages = images.filter(img => !img.processed);
-    
-    for (const image of unprocessedImages) {
-      await processImage(image.id);
-    }
-    
+    const ids = images.filter((img) => !img.processed).map((img) => img.id);
+
+    const CONCURRENCY_LIMIT = 3;
+    let index = 0;
+    const workers = new Array(Math.min(CONCURRENCY_LIMIT, ids.length)).fill(0).map(async () => {
+      while (true) {
+        const i = index++;
+        if (i >= ids.length) break;
+        await processImage(ids[i]);
+      }
+    });
+
+    await Promise.all(workers);
     setProcessing(false);
   };
 
@@ -184,6 +206,28 @@ const ImageRenamer = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen font-sans">
+      {/* Toasts */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`px-4 py-3 rounded shadow text-white flex items-center gap-3 min-w-[260px] ${
+              t.type === 'error' ? 'bg-red-600' : t.type === 'success' ? 'bg-green-600' : 'bg-gray-800'
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="text-sm font-medium flex-1">{t.message}</span>
+            <button
+              aria-label="Close notification"
+              className="p-1 rounded hover:bg-white/20 transition-colors"
+              onClick={() => dismissToast(t.id)}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
       <div className="text-center mb-8">
         <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Image Renamer</h1>
         <p className="text-gray-600 text-lg">Upload images and get descriptive filenames powered by AI.</p>

@@ -5,198 +5,123 @@ interface RequestBody {
   originalName: string;
 }
 
+type AnthropicMessage = {
+  role: 'user';
+  content: Array<
+    | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+    | { type: 'text'; text: string }
+  >;
+};
+
 interface AnthropicRequestBody {
   model: string;
   max_tokens: number;
-  messages: Array<{
-    role: string;
-    content: Array<{
-      type: string;
-      text?: string;
-      source?: {
-        type: string;
-        media_type: string;
-        data: string;
-      };
-    }>;
-  }>;
+  messages: AnthropicMessage[];
 }
 
-// API route handler
-const handler = async (req: VercelRequest, res: VercelResponse) => {
-  console.log('🚀 API handler called:', req.method);
-  
+interface AnthropicResponse {
+  content?: Array<{ text?: string; type: string }>;
+}
+
+const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelResponse> => {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { imageData, originalName } = req.body;
-    console.log('📝 Request body received:', { hasImageData: !!imageData, originalName });
+    const { imageData, originalName } = (req.body || {}) as Partial<RequestBody>;
 
     if (!imageData || !originalName) {
       return res.status(400).json({ error: 'Missing imageData or originalName' });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
-    console.log('Debug - Available env vars:', Object.keys(process.env));
-    console.log('Debug - ANTHROPIC env vars:', Object.keys(process.env).filter(k => k.includes('ANTHROPIC')));
-    console.log('Debug - API Key Length:', apiKey ? apiKey.length : 0);
-    
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('ANTHROPIC')));
-      return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      return res.status(500).json({ error: 'Server misconfigured: missing ANTHROPIC_API_KEY' });
     }
 
-    const base64Data = imageData.split(',')[1];
-    const fileExtension = originalName.split('.').pop()?.toLowerCase() || 'jpeg';
+    // Extract mime + base64 from data URL if present
+    const isDataUrl = imageData.startsWith('data:');
+    let mediaType = 'image/jpeg';
+    let base64Data = imageData;
 
-    console.log('🔑 API key available:', !!apiKey);
-    console.log('📁 File extension:', fileExtension);
-    console.log('🖼️ Base64 data length:', base64Data.length);
+    if (isDataUrl) {
+      const [meta, data] = imageData.split(',', 2);
+      base64Data = data || '';
+      const match = /^data:(.+?);base64$/i.exec(meta);
+      if (match?.[1]) {
+        mediaType = match[1].toLowerCase();
+      }
+    } else {
+      const ext = (originalName.split('.').pop() || 'jpeg').toLowerCase();
+      mediaType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+    }
 
-    console.log('📤 Making request to Anthropic API...', {
-      model: 'claude-4-opus-20250514',
-      apiKeyPresent: !!apiKey,
-      imageSize: base64Data.length,
-      endpoint: 'https://api.anthropic.com/v1/messages'
-    });
+    if (!base64Data) {
+      return res.status(400).json({ error: 'Invalid image data' });
+    }
 
-    let response;
-    let errorText;
-    try {
-      const requestBody = {
-        model: 'claude-4-opus-20250514',
-        max_tokens: 50,
-        messages: [{
+    const requestBody: AnthropicRequestBody = {
+      model: 'claude-3-5-sonnet-latest',
+      max_tokens: 50,
+      messages: [
+        {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
-                data: base64Data
-              }
-            },
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
             {
               type: 'text',
-              text: 'Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension.'
-            }
-          ]
-        }]
-      };
-
-      console.log('📤 Request structure:', {
-        ...requestBody,
-        messages: [{
-          ...requestBody.messages[0],
-          content: requestBody.messages[0].content.map(c => 
-            c.type === 'image' ? { ...c, source: { ...c.source, data: '[BASE64_DATA]' }} : c
-          )
-        }]
-      });
-
-      response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'x-api-key': apiKey,
+              text:
+                'Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension.',
+            },
+          ],
         },
-        body: JSON.stringify(requestBody)
-      });
-    } catch (fetchError) {
-      console.error('💥 Network error:', {
-        name: fetchError?.constructor?.name,
-        message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
-        stack: fetchError instanceof Error ? fetchError.stack : undefined
-      });
-      throw fetchError;
-    }
+      ],
+    };
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(e => 'Failed to read error response');
-      console.error('❌ Anthropic API error:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries([...response.headers.entries()]),
-        error: errorText
-      });
-      throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
-    }
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`,
-                  data: base64Data
-                }
-              },
-              {
-                type: 'text',
-                text: 'Generate a descriptive filename for this image. The filename should be concise, lowercase, use underscores instead of spaces, and accurately describe the main subject and setting. Respond with only the filename, without the file extension.'
-              }
-            ]
-          }
-        ]
-      })
-    });
-
-    console.log('📨 Response details:', {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries([...response.headers.entries()])
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': apiKey.trim(),
+      },
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(e => 'Failed to read error response');
-      console.error('❌ API error:', {
+      const errorText = await response.text().catch(() => 'Failed to read error response');
+      return res.status(502).json({
+        error: 'Upstream Anthropic error',
         status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries([...response.headers.entries()]),
-        error: errorText,
-        key: apiKey ? 'Present (length: ' + apiKey.length + ')' : 'Missing'
+        detail: errorText.slice(0, 2000),
       });
-      throw new Error(`API error: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json();
-    console.log('✅ API response:', {
-      status: response.status,
-      headers: Object.fromEntries([...response.headers.entries()]),
-      data: JSON.stringify(data, null, 2)
-    });
-    
-    if (!data.content || !data.content[0] || !data.content[0].text) {
+    const data = (await response.json()) as AnthropicResponse;
+    const raw = data?.content?.[0]?.text?.trim();
+    if (!raw) {
       return res.status(500).json({ error: 'Invalid API response structure' });
     }
 
-    let suggestedName = data.content[0].text.trim();
-    
-    // Clean the suggested name
-    suggestedName = suggestedName
+    const fromExt = isDataUrl
+      ? mediaType.split('/')[1]
+      : (originalName.split('.').pop() || 'jpeg').toLowerCase();
+    const ext = (fromExt === 'jpg' ? 'jpeg' : fromExt).replace(/[^a-z0-9]/gi, '') || 'jpeg';
+
+    let name = raw
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
       .replace(/\s+/g, '_')
       .toLowerCase()
-      .substring(0, 50);
-    
-    const finalName = `${suggestedName}.${fileExtension}`;
-    
+      .slice(0, 80)
+      .replace(/^_+|_+$/g, '') || 'image';
+
+    const finalName = `${name}.${ext}`;
     return res.status(200).json({ suggestedName: finalName });
-
-  } catch (error) {
-    console.error('💥 Server error:', {
-      type: error?.constructor?.name,
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    
-    return res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Unknown server error',
-      type: error?.constructor?.name
-    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown server error';
+    return res.status(500).json({ error: message });
   }
-}
+};
 
-export { handler as default };
+export default handler;
