@@ -29,13 +29,15 @@ const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { imageData, originalName } = (req.body || {}) as Partial<RequestBody>;
+    const rawBody = req.body as unknown;
+    const parsed = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
+    const { imageData, originalName } = (parsed || {}) as Partial<RequestBody>;
 
     if (!imageData || !originalName) {
       return res.status(400).json({ error: 'Missing imageData or originalName' });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY || (process.env.NODE_ENV !== 'production' ? process.env.VITE_ANTHROPIC_API_KEY : undefined);
     if (!apiKey) {
       return res.status(500).json({ error: 'Server misconfigured: missing ANTHROPIC_API_KEY' });
     }
