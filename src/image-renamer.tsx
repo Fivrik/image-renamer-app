@@ -308,7 +308,7 @@ const ImageRenamer = () => {
                         value={editingName}
                         onChange={(e) => setEditingName(e.target.value)}
                         className="flex-1 text-sm px-2 py-1 border border-blue-500 rounded ring-2 ring-blue-200"
-                        onKeyPress={(e) => e.key === 'Enter' && saveEdit()}
+                        onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
                         autoFocus
                       />
                       <button onClick={saveEdit} aria-label="Save name" className="p-1.5 text-green-600 hover:bg-green-100 rounded"><Check className="w-5 h-5" /></button>
