@@ -70,7 +70,8 @@ const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelR
         {
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
+            // Use the current vision content block type
+            { type: 'input_image', source: { type: 'base64', media_type: mediaType, data: base64Data } as any },
             {
               type: 'text',
               text:
@@ -101,10 +102,13 @@ const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     const data = (await response.json()) as AnthropicResponse;
-    const raw = data?.content?.[0]?.text?.trim();
+    let raw = data?.content?.[0]?.text?.trim();
     if (!raw) {
       return res.status(500).json({ error: 'Invalid API response structure' });
     }
+
+    // If the model returned a trailing extension, strip it before sanitizing
+    raw = raw.replace(/\.(jpe?g|png|gif|webp|tiff|bmp)$/i, '');
 
     const fromExt = isDataUrl
       ? mediaType.split('/')[1]
