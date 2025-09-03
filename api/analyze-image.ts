@@ -64,14 +64,15 @@ const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     const requestBody: AnthropicRequestBody = {
-      model: 'claude-3-5-sonnet-latest',
+      // Pin to a known, stable model variant to avoid 400s on unknown aliases
+      model: 'claude-3-5-sonnet-20240620',
       max_tokens: 50,
       messages: [
         {
           role: 'user',
           content: [
-            // Use the current vision content block type
-            { type: 'input_image', source: { type: 'base64', media_type: mediaType, data: base64Data } as any },
+            // Use widely supported image content block format
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
             {
               type: 'text',
               text:
@@ -93,11 +94,20 @@ const handler = async (req: VercelRequest, res: VercelResponse): Promise<VercelR
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Failed to read error response');
-      return res.status(502).json({
+      // Try JSON first for structured error, fallback to text
+      const contentType = response.headers.get('content-type') || '';
+      let detail: unknown = undefined;
+      if (contentType.includes('application/json')) {
+        detail = await response.json().catch(() => undefined);
+      }
+      if (!detail) {
+        const errorText = await response.text().catch(() => 'Failed to read error response');
+        detail = errorText.slice(0, 2000);
+      }
+      return res.status(response.status).json({
         error: 'Upstream Anthropic error',
         status: response.status,
-        detail: errorText.slice(0, 2000),
+        detail,
       });
     }
 
