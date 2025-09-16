@@ -37,20 +37,17 @@ if not exist "dist" (
     )
 )
 
-REM Check for API key
+REM Load API key from .env file
+for /f "tokens=2 delims==" %%i in ('findstr "ANTHROPIC_API_KEY" .env 2^>nul') do set ANTHROPIC_API_KEY=%%i
+
+REM Check if API key was loaded
 if "%ANTHROPIC_API_KEY%"=="" (
     echo.
     echo =======================================
-    echo    SETUP REQUIRED
+    echo    API KEY MISSING
     echo =======================================
-    echo You need an Anthropic API key to use this app.
-    echo.
-    echo 1. Go to: https://console.anthropic.com
-    echo 2. Create an account and get an API key
-    echo 3. Set your API key by running:
-    echo    set ANTHROPIC_API_KEY=your-key-here
-    echo.
-    echo Then run this script again.
+    echo Please make sure your .env file contains:
+    echo ANTHROPIC_API_KEY=your-key-here
     echo.
     pause
     exit /b 1
@@ -64,5 +61,6 @@ echo.
 echo To stop the app, close this window or press Ctrl+C
 echo.
 
-REM Start the server
+REM Start the server and open browser
+start "" "http://localhost:3000"
 npm start

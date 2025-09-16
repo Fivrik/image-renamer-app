@@ -1,0 +1,53 @@
+🎉 AI IMAGE RENAMER - SIMPLE INSTRUCTIONS 🎉
+
+Hi Mom! Here's how to use the AI Image Renamer:
+
+=================================================
+STEP 1: START THE APP
+=================================================
+1. Find the file called "🎯 START AI IMAGE RENAMER.bat" in this folder
+2. Double-click on "🎯 START AI IMAGE RENAMER.bat"
+3. A black window will open and do some setup automatically
+4. Wait for it to say "AI Image Renamer is running!"
+5. Your web browser should automatically open to the app
+
+=================================================
+STEP 2: USE THE APP
+=================================================
+1. In your browser, you'll see the AI Image Renamer page
+2. Click "Choose Files" or drag and drop your images
+3. Select the images you want to rename
+4. The AI will analyze each image and suggest a descriptive name
+5. Click "Download" to save the renamed images
+
+=================================================
+STEP 3: STOP THE APP
+=================================================
+When you're done:
+1. Close the browser tab
+2. Go back to the black window that opened
+3. Close that window (or press Ctrl+C)
+
+=================================================
+TROUBLESHOOTING
+=================================================
+- If the browser doesn't open automatically, go to: http://localhost:3000
+- If you see any error messages, close everything and try again
+- Make sure you have a good internet connection (the AI needs it)
+
+=================================================
+WHAT THE AI DOES
+=================================================
+The AI looks at your pictures and creates descriptive names like:
+- "sunset_over_mountains.jpg"
+- "birthday_cake_with_candles.jpg"
+- "golden_retriever_playing_fetch.jpg"
+
+This makes it much easier to find your photos later!
+
+=================================================
+NEED HELP?
+=================================================
+If something doesn't work, call or text me and I'll help you fix it.
+
+Enjoy using your new AI Image Renamer! ❤️
