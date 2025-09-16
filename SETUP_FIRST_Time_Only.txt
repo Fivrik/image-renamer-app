@@ -1,0 +1,39 @@
+========================================
+🔧 ONE-TIME SETUP INSTRUCTIONS 🔧
+========================================
+
+Hi Mom! You need to do this ONCE before using the app:
+
+STEP 1: CREATE THE API KEY FILE
+--------------------------------
+1. You should be in the folder where you unzipped the files
+   (You'll see files like "Instructions_for_Mom.txt" and "🎯 START AI IMAGE RENAMER.bat")
+
+2. Right-click in an empty space in the folder
+
+3. Click: New → Text Document
+
+4. Name it EXACTLY: .env
+   (Yes, it starts with a dot! Windows might warn you - that's OK, click "Yes")
+
+5. Open the .env file in Notepad
+
+6. Copy and paste this ENTIRE line (I'll send you the actual key separately):
+   ANTHROPIC_API_KEY=your-api-key-here
+
+7. Save the file (Ctrl+S) and close Notepad
+
+STEP 2: TEST IT WORKS
+----------------------
+1. Double-click "🎯 START AI IMAGE RENAMER.bat"
+2. If it works, your browser will open!
+3. If you see "API KEY MISSING" error, check that you saved the .env file correctly
+
+========================================
+THAT'S IT! You only need to do this ONCE!
+========================================
+
+After this setup, you can just double-click
+"🎯 START AI IMAGE RENAMER.bat" anytime to use the app!
+
+Need help? Call me! ❤️
