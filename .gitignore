@@ -26,3 +26,8 @@ dist-ssr
 .env.local
 .vercel
 .env*
+
+# Files with API keys - NEVER commit these
+API_KEY_FOR_MOM_PRIVATE.txt
+START_FAILSAFE_With_API_Key.bat
+TROUBLESHOOTING_Surface_Pro.txt
