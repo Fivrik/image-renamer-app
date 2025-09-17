@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Upload, Camera, Download, Loader, Edit3, Check, X } from 'lucide-react';
+import exifr from 'exifr';
 
 // Define a clear "shape" for our image object for TypeScript
 interface ImageState {
@@ -10,6 +11,8 @@ interface ImageState {
   suggestedName: string;
   processing: boolean;
   processed: boolean;
+  photoDate?: string;
+  isAlreadyRenamed?: boolean;
 }
 
 const ImageRenamer = () => {
@@ -32,14 +35,67 @@ const ImageRenamer = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  // Check if a filename appears to be already AI-renamed
+  const checkIfAlreadyRenamed = (filename: string): boolean => {
+    // Check for patterns that suggest AI renaming:
+    // - Multiple underscores
+    // - Descriptive words common in AI descriptions
+    // - Date patterns like YYYY-MM-DD or YYYYMMDD
+    const aiPatterns = [
+      /_\d{4}[-_]\d{2}[-_]\d{2}/, // Date pattern YYYY-MM-DD or YYYY_MM_DD
+      /_\d{8}[-_]/, // Date pattern YYYYMMDD
+      /^[a-z]+_[a-z]+_[a-z]+/i, // Multiple words separated by underscores
+      /sunset|sunrise|landscape|portrait|selfie|group|beach|mountain|city|nature|food|pet|dog|cat/i
+    ];
+
+    // If filename has 3+ underscores and descriptive words, it's likely renamed
+    const underscoreCount = (filename.match(/_/g) || []).length;
+    const hasDescriptiveWords = aiPatterns.some(pattern => pattern.test(filename));
+
+    return underscoreCount >= 2 && hasDescriptiveWords;
+  };
+
+  // Format date for filename (YYYY-MM-DD)
+  const formatDateForFilename = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}_${month}_${day}`;
+  };
+
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     // Ensure files exist before processing
     if (!event.target.files) return;
 
     const files = Array.from(event.target.files);
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
-    
-    imageFiles.forEach((file: File) => {
+
+    imageFiles.forEach(async (file: File) => {
+      // Check if file is already renamed
+      const isAlreadyRenamed = checkIfAlreadyRenamed(file.name);
+
+      // Try to get EXIF date from the image
+      let photoDate = '';
+      try {
+        const exifData = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate', 'ModifyDate']);
+        if (exifData) {
+          // Try different date fields in order of preference
+          const dateValue = exifData.DateTimeOriginal || exifData.CreateDate || exifData.ModifyDate;
+          if (dateValue) {
+            photoDate = formatDateForFilename(new Date(dateValue));
+            console.log('📅 EXIF date found:', photoDate);
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Could not read EXIF data:', error);
+      }
+
+      // Fallback to file modification date if no EXIF date
+      if (!photoDate) {
+        photoDate = formatDateForFilename(new Date(file.lastModified));
+        console.log('📅 Using file date as fallback:', photoDate);
+      }
+
       const reader = new FileReader();
       reader.onload = (e) => {
         // Ensure the result exists and is a string
@@ -52,13 +108,21 @@ const ImageRenamer = () => {
           base64: e.target.result,
           suggestedName: '',
           processing: false,
-          processed: false
+          processed: false,
+          photoDate,
+          isAlreadyRenamed
         };
+
+        // If already renamed, show a notification
+        if (isAlreadyRenamed) {
+          showToast(`"${file.name}" appears to be already renamed`, 'info');
+        }
+
         setImages(prev => [...prev, newImage]);
       };
       reader.readAsDataURL(file);
     });
-  }, []);
+  }, [checkIfAlreadyRenamed, showToast]);
 
   const generateDescriptiveName = async (imageData: string, originalName: string) => {
     try {
@@ -129,22 +193,50 @@ const ImageRenamer = () => {
     }
   };
 
-  const processImage = async (imageId: number) => {
-    setImages(prev => prev.map(img => 
-      img.id === imageId ? { ...img, processing: true } : img
-    ));
-
+  const processImage = useCallback(async (imageId: number) => {
     const image = images.find(img => img.id === imageId);
     if (!image) return;
 
-    const suggestedName = await generateDescriptiveName(image.base64, image.originalName);
+    // Skip processing if already renamed
+    if (image.isAlreadyRenamed) {
+      showToast(`Skipping "${image.originalName}" - already renamed`, 'info');
+      setImages(prev => prev.map(img =>
+        img.id === imageId
+          ? { ...img, suggestedName: image.originalName, processing: false, processed: true }
+          : img
+      ));
+      return;
+    }
 
-    setImages(prev => prev.map(img => 
-      img.id === imageId 
+    setImages(prev => prev.map(img =>
+      img.id === imageId ? { ...img, processing: true } : img
+    ));
+
+    let suggestedName = await generateDescriptiveName(image.base64, image.originalName);
+
+    // Add date to the filename if we have it
+    if (image.photoDate && suggestedName) {
+      // Get the file extension
+      const lastDotIndex = suggestedName.lastIndexOf('.');
+      let nameWithoutExt = suggestedName;
+      let extension = '';
+
+      if (lastDotIndex > -1) {
+        nameWithoutExt = suggestedName.substring(0, lastDotIndex);
+        extension = suggestedName.substring(lastDotIndex);
+      }
+
+      // Add date at the beginning of the filename
+      suggestedName = `${image.photoDate}_${nameWithoutExt}${extension}`;
+      console.log('📅 Added date to filename:', suggestedName);
+    }
+
+    setImages(prev => prev.map(img =>
+      img.id === imageId
         ? { ...img, suggestedName, processing: false, processed: true }
         : img
     ));
-  };
+  }, [images, showToast]);
 
   const processAllImages = async () => {
     setProcessing(true);
@@ -297,6 +389,12 @@ const ImageRenamer = () => {
                 <div className="mb-2 flex-grow">
                   <p className="text-xs text-gray-500 mb-1">Original:</p>
                   <p className="text-sm font-medium text-gray-700 truncate" title={image.originalName}>{image.originalName}</p>
+                  {image.photoDate && (
+                    <p className="text-xs text-blue-600 mt-1">📅 Photo taken: {image.photoDate}</p>
+                  )}
+                  {image.isAlreadyRenamed && (
+                    <p className="text-xs text-green-600 mt-1">✅ Already renamed</p>
+                  )}
                 </div>
                 
                 <div className="mb-4">
