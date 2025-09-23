@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Upload, Camera, Download, Loader, Edit3, Check, X } from 'lucide-react';
+import { Upload, Camera, Download, Loader, Edit3, Check, X, Users } from 'lucide-react';
 import exifr from 'exifr';
+import peopleDetectionService, { type DetectedPerson } from './services/peopleDetectionService';
+import embeddedTagsService, { type EmbeddedPerson } from './services/embeddedTagsService';
 
 // Define a clear "shape" for our image object for TypeScript
 interface ImageState {
@@ -13,6 +15,12 @@ interface ImageState {
   processed: boolean;
   photoDate?: string;
   isAlreadyRenamed?: boolean;
+  detectedPeople?: DetectedPerson[];
+  peopleProcessing?: boolean;
+  embeddedPeople?: EmbeddedPerson[];
+  hasEmbeddedTags?: boolean;
+  tagProcessing?: boolean;
+  taggingSoftware?: string;
 }
 
 const ImageRenamer = () => {
@@ -22,6 +30,10 @@ const ImageRenamer = () => {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'error' | 'success' }>>([]);
+  const [showPeopleManager, setShowPeopleManager] = useState(false);
+  const [knownPeople, setKnownPeople] = useState(peopleDetectionService.getKnownPeople());
+  const [newPersonName, setNewPersonName] = useState('');
+  const [newPersonDescription, setNewPersonDescription] = useState('');
 
   const showToast = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
     const id = Date.now() + Math.random();
@@ -212,11 +224,82 @@ const ImageRenamer = () => {
       img.id === imageId ? { ...img, processing: true } : img
     ));
 
+    // STEP 1: Extract embedded people tags first (highest priority)
+    let embeddedPeople: EmbeddedPerson[] = [];
+    let hasEmbeddedTags = false;
+    let taggingSoftware: string | undefined;
+
+    try {
+      setImages(prev => prev.map(img =>
+        img.id === imageId ? { ...img, tagProcessing: true } : img
+      ));
+
+      const tagResult = await embeddedTagsService.extractPeopleTags(image.originalFile);
+      embeddedPeople = tagResult.people;
+      hasEmbeddedTags = tagResult.hasEmbeddedTags;
+      taggingSoftware = tagResult.metadata?.software;
+
+      setImages(prev => prev.map(img =>
+        img.id === imageId ? {
+          ...img,
+          embeddedPeople,
+          hasEmbeddedTags,
+          taggingSoftware,
+          tagProcessing: false
+        } : img
+      ));
+
+      if (embeddedPeople.length > 0) {
+        const peopleNames = embeddedPeople.map(p => p.name).join(', ');
+        console.log(`📌 Found embedded people tags: ${peopleNames}`);
+        showToast(`Found tagged people: ${peopleNames}`, 'success');
+      } else {
+        console.log('📭 No embedded people tags found');
+      }
+    } catch (error) {
+      console.error('❌ Error extracting embedded tags:', error);
+      setImages(prev => prev.map(img =>
+        img.id === imageId ? { ...img, tagProcessing: false } : img
+      ));
+    }
+
+    // STEP 2: Use Claude AI for people detection only if no embedded tags
+    let detectedPeople: DetectedPerson[] = [];
+    if (embeddedPeople.length === 0) {
+      console.log('🤖 No embedded people tags found, using Claude AI detection...');
+      try {
+        setImages(prev => prev.map(img =>
+          img.id === imageId ? { ...img, peopleProcessing: true } : img
+        ));
+
+        detectedPeople = await peopleDetectionService.detectPeopleInImage(
+          image.base64,
+          image.originalName
+        );
+
+        setImages(prev => prev.map(img =>
+          img.id === imageId ? { ...img, detectedPeople, peopleProcessing: false } : img
+        ));
+
+        if (detectedPeople.length > 0) {
+          const peopleNames = detectedPeople.map(p => p.name).join(', ');
+          console.log(`🤖 Claude AI detected people: ${peopleNames}`);
+        }
+      } catch (error) {
+        console.error('❌ Error with Claude AI detection:', error);
+        setImages(prev => prev.map(img =>
+          img.id === imageId ? { ...img, peopleProcessing: false } : img
+        ));
+      }
+    } else {
+      console.log('✅ Using embedded people tags, skipping Claude AI detection');
+    }
+
+    // STEP 3: Generate AI description
     let suggestedName = await generateDescriptiveName(image.base64, image.originalName);
 
-    // Add date to the filename if we have it
-    if (image.photoDate && suggestedName) {
-      // Get the file extension
+    // STEP 4: Build enhanced filename
+    if (suggestedName) {
       const lastDotIndex = suggestedName.lastIndexOf('.');
       let nameWithoutExt = suggestedName;
       let extension = '';
@@ -226,9 +309,50 @@ const ImageRenamer = () => {
         extension = suggestedName.substring(lastDotIndex);
       }
 
-      // Add date at the beginning of the filename
-      suggestedName = `${image.photoDate}_${nameWithoutExt}${extension}`;
-      console.log('📅 Added date to filename:', suggestedName);
+      const parts = [];
+
+      // Add date first if available
+      if (image.photoDate) {
+        parts.push(image.photoDate);
+        console.log('📅 Added date to filename');
+      }
+
+      // Add people names (prioritize embedded tags over AI detection)
+      let peopleNames: string[] = [];
+      if (embeddedPeople.length > 0) {
+        // Use embedded people tags (highest priority)
+        peopleNames = embeddedPeople.map(person =>
+          person.name.toLowerCase()
+            .replace(/\s+/g, '_')
+            .replace(/[^a-z0-9_]/g, '')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '')
+        ).filter(name => name.length > 0);
+
+        if (peopleNames.length > 0) {
+          console.log(`📌 Using embedded people tags in filename: ${peopleNames.join(', ')}`);
+        }
+      } else if (detectedPeople.length > 0) {
+        // Fallback to Claude AI detection
+        peopleNames = detectedPeople
+          .filter(person => person.confidence === 'high' || person.confidence === 'medium')
+          .map(person => person.name.toLowerCase().replace(/\s+/g, '_'));
+
+        if (peopleNames.length > 0) {
+          console.log(`🤖 Using Claude AI detected people in filename: ${peopleNames.join(', ')}`);
+        }
+      }
+
+      if (peopleNames.length > 0) {
+        parts.push(peopleNames.join('_and_'));
+      }
+
+      // Add AI description
+      parts.push(nameWithoutExt);
+
+      // Combine all parts
+      suggestedName = parts.join('_') + extension;
+      console.log('🎯 Final filename:', suggestedName);
     }
 
     setImages(prev => prev.map(img =>
@@ -296,6 +420,44 @@ const ImageRenamer = () => {
     setImages(prev => prev.filter(img => img.id !== imageId));
   };
 
+  // People management functions
+  const addNewPerson = () => {
+    if (!newPersonName.trim() || !newPersonDescription.trim()) {
+      showToast('Please provide both name and description', 'error');
+      return;
+    }
+
+    try {
+      peopleDetectionService.addKnownPerson({
+        name: newPersonName.trim(),
+        description: newPersonDescription.trim(),
+      });
+
+      setKnownPeople(peopleDetectionService.getKnownPeople());
+      setNewPersonName('');
+      setNewPersonDescription('');
+      showToast(`Added ${newPersonName} to known people`, 'success');
+    } catch (error) {
+      showToast('Failed to add person', 'error');
+    }
+  };
+
+  const removePerson = (personId: string) => {
+    try {
+      peopleDetectionService.removePerson(personId);
+      setKnownPeople(peopleDetectionService.getKnownPeople());
+      showToast('Person removed successfully', 'success');
+    } catch (error) {
+      showToast('Failed to remove person', 'error');
+    }
+  };
+
+  const clearAllPeople = () => {
+    peopleDetectionService.clearAllPeople();
+    setKnownPeople([]);
+    showToast('All people cleared', 'success');
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen font-sans">
       {/* Toasts */}
@@ -323,6 +485,23 @@ const ImageRenamer = () => {
       <div className="text-center mb-8">
         <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Image Renamer</h1>
         <p className="text-gray-600 text-lg">Upload images and get descriptive filenames powered by AI.</p>
+
+        {/* Helpful reminder about people tagging */}
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg max-w-2xl mx-auto">
+          <div className="flex items-start gap-3">
+            <Users className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div className="text-left">
+              <h3 className="font-semibold text-blue-800 text-sm">💡 Pro Tip: Tag People First!</h3>
+              <p className="text-blue-700 text-sm mt-1">
+                For best results, tag people in your photos using <strong>Windows Photo Gallery</strong> or similar software before uploading.
+                The app will use your exact tags and fall back to AI detection for untagged photos.
+              </p>
+              <p className="text-blue-600 text-xs mt-2">
+                ✅ Tagged photos → Uses your names &nbsp;|&nbsp; 🤖 Untagged photos → Uses AI detection
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -354,7 +533,7 @@ const ImageRenamer = () => {
             {processing ? <Loader className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
             {processing ? 'Processing...' : `Process All (${images.filter(i => !i.processed).length})`}
           </button>
-          
+
           <button
             onClick={downloadAllImages}
             disabled={!images.some(img => img.processed)}
@@ -363,6 +542,116 @@ const ImageRenamer = () => {
             <Download className="w-5 h-5" />
             Download All Renamed
           </button>
+
+          <button
+            onClick={() => setShowPeopleManager(true)}
+            className="flex items-center gap-2 px-4 py-2 font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            <Users className="w-5 h-5" />
+            Manage People ({knownPeople.length})
+          </button>
+        </div>
+      )}
+
+      {/* People Manager Modal */}
+      {showPeopleManager && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-2xl max-h-[80vh] overflow-hidden">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                  <Users className="w-6 h-6" />
+                  Manage Known People
+                </h2>
+                <button
+                  onClick={() => setShowPeopleManager(false)}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-gray-600 mt-2">Add people you want the AI to recognize in your photos. Provide a detailed description to help with identification.</p>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-96">
+              {/* Add New Person Form */}
+              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                <h3 className="font-semibold text-gray-800 mb-3">Add New Person</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={newPersonName}
+                      onChange={(e) => setNewPersonName(e.target.value)}
+                      placeholder="e.g., Mom, John Smith, Sarah"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea
+                      value={newPersonDescription}
+                      onChange={(e) => setNewPersonDescription(e.target.value)}
+                      placeholder="e.g., Middle-aged woman with brown hair and glasses, usually wearing colorful shirts"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      rows={2}
+                    />
+                  </div>
+                  <button
+                    onClick={addNewPerson}
+                    disabled={!newPersonName.trim() || !newPersonDescription.trim()}
+                    className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Add Person
+                  </button>
+                </div>
+              </div>
+
+              {/* Known People List */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-800">Known People ({knownPeople.length})</h3>
+                  {knownPeople.length > 0 && (
+                    <button
+                      onClick={clearAllPeople}
+                      className="text-sm text-red-600 hover:text-red-700 transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                {knownPeople.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8">No people added yet. Add someone above to get started!</p>
+                ) : (
+                  <div className="space-y-3">
+                    {knownPeople.map((person) => (
+                      <div key={person.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-gray-800">{person.name}</h4>
+                            <p className="text-sm text-gray-600 mt-1">{person.description}</p>
+                            {person.aliases && person.aliases.length > 0 && (
+                              <p className="text-xs text-purple-600 mt-1">
+                                Also known as: {person.aliases.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => removePerson(person.id)}
+                            className="ml-3 p-1 text-red-600 hover:text-red-700 transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -394,6 +683,63 @@ const ImageRenamer = () => {
                   )}
                   {image.isAlreadyRenamed && (
                     <p className="text-xs text-green-600 mt-1">✅ Already renamed</p>
+                  )}
+
+                  {/* Processing indicators */}
+                  {image.tagProcessing && (
+                    <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
+                      <Loader className="w-3 h-3 animate-spin" />
+                      Reading embedded tags...
+                    </p>
+                  )}
+                  {image.peopleProcessing && (
+                    <p className="text-xs text-purple-600 mt-1 flex items-center gap-1">
+                      <Loader className="w-3 h-3 animate-spin" />
+                      AI detecting people...
+                    </p>
+                  )}
+
+                  {/* Embedded people tags (highest priority) */}
+                  {image.embeddedPeople && image.embeddedPeople.length > 0 && (
+                    <div className="text-xs text-green-600 mt-1">
+                      <p className="flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        Tagged: {image.embeddedPeople.map(p => p.name).join(', ')}
+                      </p>
+                      <p className="text-gray-500 text-xs">
+                        From {image.embeddedPeople[0].source === 'windows_gallery' ? 'Windows Photo Gallery' :
+                             image.embeddedPeople[0].source === 'adobe_bridge' ? 'Adobe software' : 'embedded metadata'}
+                        {image.taggingSoftware && ` (${image.taggingSoftware})`}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* AI detected people (fallback when no embedded tags) */}
+                  {(!image.embeddedPeople || image.embeddedPeople.length === 0) &&
+                   image.detectedPeople && image.detectedPeople.length > 0 && (
+                    <div className="text-xs text-purple-600 mt-1">
+                      <p className="flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        AI Detected: {image.detectedPeople.map(p => p.name).join(', ')}
+                      </p>
+                      <p className="text-gray-500 text-xs">From Claude AI analysis</p>
+                    </div>
+                  )}
+
+                  {/* No people found */}
+                  {!image.tagProcessing && !image.peopleProcessing &&
+                   (!image.embeddedPeople || image.embeddedPeople.length === 0) &&
+                   (!image.detectedPeople || image.detectedPeople.length === 0) &&
+                   image.processed && (
+                    <p className="text-xs text-gray-500 mt-1">👤 No people found</p>
+                  )}
+
+                  {/* Show when embedded tags found but no people tagged */}
+                  {image.hasEmbeddedTags === false && !image.tagProcessing && image.processed && (
+                    <div className="text-xs text-blue-600 mt-1 p-2 bg-blue-50 rounded border">
+                      <p className="font-medium">📭 No people tags found</p>
+                      <p className="text-blue-500">Tip: Tag people in Windows Photo Gallery first for better results!</p>
+                    </div>
                   )}
                 </div>
                 
